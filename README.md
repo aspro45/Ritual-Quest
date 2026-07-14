@@ -2,6 +2,8 @@
 
 A builder reputation layer for Ritual.
 
+**Live app:** [ritual-proofgraph.vercel.app](https://ritual-proofgraph.vercel.app/)
+
 ProofGraph connects three signals that usually stay separated: wallet activity, Discord identity, and public X participation. The app verifies Ritual onchain activity, links Discord through OAuth, keeps X as a public evidence URL, and can anchor verified receipts through an onchain registry.
 
 ## What it checks
@@ -85,7 +87,9 @@ Set `VITE_PROOFGRAPH_REVIEW_START_BLOCK` and `VITE_REVIEW_DECISIONS_START_BLOCK`
 
 The `Calendar` route is a shared website schedule. It does not require a Discord bot and it does not publish events to Discord. Everyone can read the week view; only Discord members holding a role in `DISCORD_EVENT_MANAGER_ROLE_IDS` can create entries after OAuth has verified their current roles.
 
-Create this table in a Supabase project, then add the server-only variables below to `.env` and Vercel. Do not expose the service-role key with a `VITE_` prefix.
+Production uses a private Vercel Blob store connected to the Vercel project. Vercel injects `BLOB_READ_WRITE_TOKEN` automatically; keep it server-only and never add a `VITE_` prefix. The API uses optimistic ETag writes so concurrent organizers cannot silently overwrite each other's events.
+
+Supabase remains an optional replacement. When `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present, create this table and the API will use it instead of Blob:
 
 ```sql
 create table if not exists public.calendar_events (
@@ -112,6 +116,8 @@ alter table public.calendar_events
 
 ```env
 OAUTH_STATE_SECRET=use-a-long-random-string
+BLOB_READ_WRITE_TOKEN=provided-by-vercel
+# Optional Supabase replacement:
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=
 DISCORD_EVENT_MANAGER_ROLE_IDS=role-id-one,role-id-two
@@ -120,13 +126,13 @@ DISCORD_EVENT_MANAGER_WALLETS=0xverified-manager-wallet
 
 The browser only receives normalized public event data. Event creation runs through the server, which validates the signed Discord session against the role or wallet allowlist before it writes to the shared calendar. Wallet access is accepted only from the wallet stored in the signed Discord OAuth session, never from an unverified browser address. Organizers can add a public HTTPS cover image; the server rejects non-HTTPS image URLs before storage.
 
-During local development, when Supabase is not configured, the API uses the ignored `.local-data/calendar-events.json` file so authorized organizers can create and reload real local events. Vercel never uses this fallback; production calendar writes still require Supabase.
+During local development, when neither Blob nor Supabase is configured, the API uses the ignored `.local-data/calendar-events.json` file. Vercel never uses this fallback: production reads and writes use the shared Blob store.
 
 ## Role-gated campaign publishing
 
 The Explore page can also accept campaigns created by selected Ritual Discord roles. Everyone can read published campaigns, but the creator panel appears only when the signed Discord session contains a role listed in `DISCORD_CAMPAIGN_MANAGER_ROLE_IDS`.
 
-Create the shared campaign table in the same Supabase project:
+Campaigns use the same private Blob store as the calendar. If Supabase is selected instead, create the shared campaign table in the same Supabase project:
 
 ```sql
 create table if not exists public.quest_campaigns (
@@ -160,7 +166,7 @@ DISCORD_CAMPAIGN_MANAGER_ROLE_IDS=role-id-one,role-id-two
 DISCORD_CAMPAIGN_MANAGER_WALLETS=0xYourManagerWallet
 ```
 
-Manager access can come from an allowed Discord role or an allowed wallet. Wallet access is not accepted from a browser address alone: Discord OAuth first verifies the wallet signature, then stores that wallet inside the signed HttpOnly session. The server owns the category and task allowlists, adds the wallet check automatically, and stores only normalized campaign data. Creators can combine the existing receipt-backed templates with one custom social quest containing their own title, instructions, up to five X accounts, a target X post, and selected Like/Repost/Reply actions. The custom step uses a per-wallet 60-second local timer and is explicitly self-attested: it awards no points and writes no onchain receipt. Public X/project proofs still use the reviewer flow and receive points only after approval. Review-based tasks are scoped to the campaign ID, so approving one campaign cannot complete the same task in another campaign. `SUPABASE_SERVICE_ROLE_KEY` stays server-only and must never use a `VITE_` prefix.
+Manager access can come from an allowed Discord role or an allowed wallet. Wallet access is not accepted from a browser address alone: Discord OAuth first verifies the wallet signature, then stores that wallet inside the signed HttpOnly session. The server owns the category and task allowlists, adds the wallet check automatically, and stores only normalized campaign data. Creators can combine the existing receipt-backed templates with one custom social quest containing their own title, instructions, up to five X accounts, a target X post, and selected Like/Repost/Reply actions. The custom step uses a per-wallet 60-second local timer and is explicitly self-attested: it awards no points and writes no onchain receipt. Public X/project proofs still use the reviewer flow and receive points only after approval. Review-based tasks are scoped to the campaign ID, so approving one campaign cannot complete the same task in another campaign. Blob and optional Supabase credentials stay server-only and must never use a `VITE_` prefix.
 
 ## Contract
 

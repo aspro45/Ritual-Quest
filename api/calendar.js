@@ -1,8 +1,10 @@
 import { canUseEventSessions, readDiscordSession } from "./discord-session.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { blobJsonStoreConfigured, mutateBlobJsonRecords, readBlobJsonRecords } from "./blob-json-store.js";
 
 const SUPABASE_REST = "/rest/v1/calendar_events";
+const BLOB_STORE = "proofgraph/calendar-events.json";
 const LOCAL_STORE = path.join(process.cwd(), ".local-data", "calendar-events.json");
 
 class RequestError extends Error {
@@ -34,6 +36,13 @@ function supabaseConfig() {
 
 function localStoreEnabled() {
   return !process.env.VERCEL && process.env.NODE_ENV !== "production";
+}
+
+function storageMode() {
+  if (supabaseConfig().configured) return "supabase";
+  if (blobJsonStoreConfigured()) return "blob";
+  if (localStoreEnabled()) return "local";
+  return "unconfigured";
 }
 
 function json(response, status, payload) {
@@ -143,14 +152,14 @@ function payloadBase() {
   const managerRoles = eventManagerRoleIds();
   const managerWallets = eventManagerWallets();
   const store = supabaseConfig();
-  const local = !store.configured && localStoreEnabled();
+  const mode = storageMode();
   return {
-    configured: store.configured || local,
+    configured: mode !== "unconfigured",
     editorRoleConfigured: managerRoles.length > 0,
     editorWalletConfigured: managerWallets.length > 0,
     sessionConfigured: canUseEventSessions(),
-    storageMode: store.configured ? "supabase" : local ? "local" : "unconfigured",
-    source: store.configured ? `${store.url}${SUPABASE_REST}` : local ? "local-persistent-store" : ""
+    storageMode: mode,
+    source: mode === "supabase" ? `${store.url}${SUPABASE_REST}` : mode === "blob" ? "vercel-blob" : mode === "local" ? "local-persistent-store" : ""
   };
 }
 
@@ -189,15 +198,38 @@ async function writeLocalEventRecords(records) {
   await rename(temporary, LOCAL_STORE);
 }
 
+async function readStoredEventRows() {
+  const mode = storageMode();
+  if (mode === "blob") return readBlobJsonRecords(BLOB_STORE);
+  if (mode === "local") return readLocalEventRecords();
+  return [];
+}
+
+async function mutateStoredEventRows(mutate) {
+  const mode = storageMode();
+  if (mode === "blob") return mutateBlobJsonRecords(BLOB_STORE, mutate);
+  if (mode === "local") {
+    const nextRows = mutate(await readLocalEventRecords());
+    await writeLocalEventRecords(nextRows);
+    return nextRows;
+  }
+  throw new Error("Calendar storage is unavailable.");
+}
+
 async function listEventRecords() {
-  if (!supabaseConfig().configured && localStoreEnabled()) return readLocalEventRecords();
+  if (storageMode() !== "supabase") {
+    const rows = await readStoredEventRows();
+    return rows.map(normalizeEventRecord).filter(Boolean)
+      .sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt))
+      .slice(0, 100);
+  }
   const rows = await supabaseFetch(`${SUPABASE_REST}?select=id,title,description,starts_at,ends_at,location,url,image_url,created_by_discord_id,created_by_name,created_at&order=starts_at.asc&limit=100`);
   return Array.isArray(rows) ? rows.map(normalizeEventRecord).filter(Boolean) : [];
 }
 
 async function findEventRecord(id) {
-  if (!supabaseConfig().configured && localStoreEnabled()) {
-    return (await readLocalEventRecords()).find((event) => event.id === id) || null;
+  if (storageMode() !== "supabase") {
+    return (await listEventRecords()).find((event) => event.id === id) || null;
   }
   const rows = await supabaseFetch(`${SUPABASE_REST}?select=id,title,description,starts_at,ends_at,location,url,image_url,created_by_discord_id,created_by_name,created_at&id=eq.${encodeURIComponent(id)}&limit=1`);
   return normalizeEventRecord(Array.isArray(rows) ? rows[0] : null);
@@ -212,7 +244,7 @@ function assertOwner(record, session) {
 
 async function createEvent(request, session) {
   const values = cleanEventPayload(request, { requireFuture: true });
-  if (!supabaseConfig().configured && localStoreEnabled()) {
+  if (storageMode() !== "supabase") {
     const event = normalizeEventRecord({
       id: crypto.randomUUID(),
       ...values,
@@ -221,7 +253,7 @@ async function createEvent(request, session) {
       createdAt: new Date().toISOString()
     });
     if (!event) throw new Error("Event data could not be normalized.");
-    await writeLocalEventRecords([...(await readLocalEventRecords()), event]);
+    await mutateStoredEventRows((records) => [...records, event]);
     return publicEvent(event, session);
   }
   const rows = await supabaseFetch(SUPABASE_REST, {
@@ -247,10 +279,9 @@ async function updateEvent(request, session) {
   const existing = await findEventRecord(id);
   assertOwner(existing, session);
   const values = cleanEventPayload(request);
-  if (!supabaseConfig().configured && localStoreEnabled()) {
-    const records = await readLocalEventRecords();
+  if (storageMode() !== "supabase") {
     const updated = normalizeEventRecord({ ...existing, ...values });
-    await writeLocalEventRecords(records.map((event) => event.id === id ? updated : event));
+    await mutateStoredEventRows((records) => records.map((event) => cleanEventId(event?.id) === id ? updated : event));
     return publicEvent(updated, session);
   }
   const rows = await supabaseFetch(`${SUPABASE_REST}?id=eq.${encodeURIComponent(id)}&created_by_discord_id=eq.${encodeURIComponent(session.user.id)}`, {
@@ -275,9 +306,14 @@ async function deleteEvent(request, session) {
   const id = requestedEventId(request);
   const existing = await findEventRecord(id);
   assertOwner(existing, session);
-  if (!supabaseConfig().configured && localStoreEnabled()) {
-    const records = await readLocalEventRecords();
-    await writeLocalEventRecords(records.filter((event) => event.id !== id));
+  if (storageMode() !== "supabase") {
+    let removed = false;
+    await mutateStoredEventRows((records) => records.filter((event) => {
+      const keep = cleanEventId(event?.id) !== id;
+      if (!keep) removed = true;
+      return keep;
+    }));
+    if (!removed) throw new RequestError("Event could not be deleted.", 409);
     return id;
   }
   const rows = await supabaseFetch(`${SUPABASE_REST}?id=eq.${encodeURIComponent(id)}&created_by_discord_id=eq.${encodeURIComponent(session.user.id)}`, {

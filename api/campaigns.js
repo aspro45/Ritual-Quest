@@ -1,7 +1,12 @@
 import crypto from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { canUseDiscordSessions, readDiscordSession } from "./discord-session.js";
+import { blobJsonStoreConfigured, mutateBlobJsonRecords, readBlobJsonRecords } from "./blob-json-store.js";
 
 const SUPABASE_REST = "/rest/v1/quest_campaigns";
+const BLOB_STORE = "proofgraph/campaigns.json";
+const LOCAL_STORE = path.join(process.cwd(), ".local-data", "campaigns.json");
 const ALLOWED_CATEGORIES = new Set(["Builder", "Agents", "Community", "Onchain", "Discord"]);
 const ALLOWED_TASK_IDS = new Set([
   "wallet-link",
@@ -41,6 +46,17 @@ function supabaseConfig() {
   const url = String(process.env.SUPABASE_URL || "").replace(/\/$/, "");
   const key = String(process.env.SUPABASE_SERVICE_ROLE_KEY || "");
   return { url, key, configured: /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url) && key.length > 20 };
+}
+
+function localStoreEnabled() {
+  return !process.env.VERCEL && process.env.NODE_ENV !== "production";
+}
+
+function storageMode() {
+  if (supabaseConfig().configured) return "supabase";
+  if (blobJsonStoreConfigured()) return "blob";
+  if (localStoreEnabled()) return "local";
+  return "unconfigured";
 }
 
 function json(response, status, payload) {
@@ -195,12 +211,14 @@ function canCreate(session, managerRoles, managerWallets) {
 function payloadBase() {
   const managerRoles = campaignManagerRoleIds();
   const managerWallets = campaignManagerWallets();
-  const store = supabaseConfig();
+  const mode = storageMode();
   return {
-    configured: store.configured,
+    configured: mode !== "unconfigured",
     editorRoleConfigured: managerRoles.length > 0,
     editorWalletConfigured: managerWallets.length > 0,
-    sessionConfigured: canUseDiscordSessions()
+    sessionConfigured: canUseDiscordSessions(),
+    storageMode: mode,
+    source: mode === "supabase" ? `${supabaseConfig().url}${SUPABASE_REST}` : mode === "blob" ? "vercel-blob" : mode === "local" ? "local-persistent-store" : ""
   };
 }
 
@@ -221,12 +239,56 @@ async function supabaseFetch(requestPath, options = {}) {
   return payload;
 }
 
+async function readLocalCampaignRecords() {
+  try {
+    const rows = JSON.parse(await readFile(LOCAL_STORE, "utf8"));
+    return Array.isArray(rows) ? rows : [];
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function writeLocalCampaignRecords(records) {
+  await mkdir(path.dirname(LOCAL_STORE), { recursive: true });
+  const temporary = `${LOCAL_STORE}.${crypto.randomUUID()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(records, null, 2)}\n`, "utf8");
+  await rename(temporary, LOCAL_STORE);
+}
+
+async function readStoredCampaignRows() {
+  const mode = storageMode();
+  if (mode === "blob") return readBlobJsonRecords(BLOB_STORE);
+  if (mode === "local") return readLocalCampaignRecords();
+  return [];
+}
+
+async function mutateStoredCampaignRows(mutate) {
+  const mode = storageMode();
+  if (mode === "blob") return mutateBlobJsonRecords(BLOB_STORE, mutate);
+  if (mode === "local") {
+    const nextRows = mutate(await readLocalCampaignRecords());
+    await writeLocalCampaignRecords(nextRows);
+    return nextRows;
+  }
+  throw new Error("Campaign storage is unavailable.");
+}
+
 async function listCampaignRecords() {
+  if (storageMode() !== "supabase") {
+    const rows = await readStoredCampaignRows();
+    return rows.map(normalizeCampaignRecord).filter(Boolean)
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+      .slice(0, 50);
+  }
   const rows = await supabaseFetch(`${SUPABASE_REST}?select=id,title,description,category,image_url,task_ids,custom_task,created_by_discord_id,created_by_name,created_at&published=eq.true&order=created_at.desc&limit=50`);
   return Array.isArray(rows) ? rows.map(normalizeCampaignRecord).filter(Boolean) : [];
 }
 
 async function findCampaignRecord(id) {
+  if (storageMode() !== "supabase") {
+    return (await listCampaignRecords()).find((campaign) => campaign.id === id) || null;
+  }
   const rows = await supabaseFetch(`${SUPABASE_REST}?select=id,title,description,category,image_url,task_ids,custom_task,created_by_discord_id,created_by_name,created_at&id=eq.${encodeURIComponent(id)}&limit=1`);
   return normalizeCampaignRecord(Array.isArray(rows) ? rows[0] : null);
 }
@@ -240,6 +302,18 @@ function assertOwner(record, session) {
 
 async function createCampaign(request, session) {
   const values = cleanCampaignPayload(request);
+  if (storageMode() !== "supabase") {
+    const campaign = normalizeCampaignRecord({
+      id: campaignSlug(values.title),
+      ...values,
+      createdBy: session.user.username,
+      createdByDiscordId: session.user.id,
+      createdAt: new Date().toISOString()
+    });
+    if (!campaign) throw new Error("Campaign data could not be normalized.");
+    await mutateStoredCampaignRows((records) => [...records, campaign]);
+    return publicCampaign(campaign, session);
+  }
   const rows = await supabaseFetch(SUPABASE_REST, {
     method: "POST",
     headers: { "content-type": "application/json", prefer: "return=representation" },
@@ -264,6 +338,12 @@ async function updateCampaign(request, session) {
   const existing = await findCampaignRecord(id);
   assertOwner(existing, session);
   const values = cleanCampaignPayload(request);
+  if (storageMode() !== "supabase") {
+    const updated = normalizeCampaignRecord({ ...existing, ...values });
+    if (!updated) throw new RequestError("Campaign could not be updated.", 409);
+    await mutateStoredCampaignRows((records) => records.map((record) => cleanCampaignId(record?.id) === id ? updated : record));
+    return publicCampaign(updated, session);
+  }
   const rows = await supabaseFetch(`${SUPABASE_REST}?id=eq.${encodeURIComponent(id)}&created_by_discord_id=eq.${encodeURIComponent(session.user.id)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json", prefer: "return=representation" },
@@ -285,6 +365,16 @@ async function deleteCampaign(request, session) {
   const id = requestedCampaignId(request);
   const existing = await findCampaignRecord(id);
   assertOwner(existing, session);
+  if (storageMode() !== "supabase") {
+    let removed = false;
+    await mutateStoredCampaignRows((records) => records.filter((record) => {
+      const keep = cleanCampaignId(record?.id) !== id;
+      if (!keep) removed = true;
+      return keep;
+    }));
+    if (!removed) throw new RequestError("Campaign could not be deleted.", 409);
+    return id;
+  }
   const rows = await supabaseFetch(`${SUPABASE_REST}?id=eq.${encodeURIComponent(id)}&created_by_discord_id=eq.${encodeURIComponent(session.user.id)}`, {
     method: "DELETE",
     headers: { prefer: "return=representation" }
