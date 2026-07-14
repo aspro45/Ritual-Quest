@@ -5247,6 +5247,30 @@ body {
   font-size: 0.72rem;
 }
 
+.campaign-form-error {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 26px 18px;
+  border: 1px solid rgba(255, 91, 91, 0.45);
+  border-left: 3px solid #ff5b5b;
+  border-radius: 6px;
+  padding: 12px 14px;
+  color: #ffd1d1;
+  background: rgba(255, 91, 91, 0.08);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.campaign-form-error[hidden] {
+  display: none;
+}
+
+.campaign-form-error strong {
+  flex: 0 0 auto;
+  color: #fff1f1;
+}
+
 .campaign-studio .campaign-composer-actions {
   display: flex;
   min-height: 72px;

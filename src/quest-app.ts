@@ -836,6 +836,10 @@ function renderCampaignComposer() {
             </div>
           </aside>
         </div>
+        <div class="campaign-form-error" role="alert" hidden data-campaign-form-error>
+          <strong>Campaign not published.</strong>
+          <span data-campaign-form-error-copy>Check the campaign details and try again.</span>
+        </div>
         ${storageReady ? "" : `<p class="campaign-storage-note">Creator access is active. Configure shared campaign storage before publishing.</p>`}
         <footer class="campaign-composer-actions">
           <span>${editing ? "Changes are saved to the same campaign." : "Review the preview before publishing."}</span>
@@ -2047,6 +2051,7 @@ function bindEvents() {
   document.querySelectorAll<HTMLElement>("[data-action='toggle-campaign-composer']").forEach((button) => button.addEventListener("click", () => {
     state.campaignDirectory.composerOpen = !state.campaignDirectory.composerOpen;
     state.campaignDirectory.editingId = "";
+    state.status = "";
     render();
   }));
   document.querySelectorAll<HTMLElement>("[data-action='edit-campaign']").forEach((button) => button.addEventListener("click", () => openCampaignEditor(button.dataset.campaign || "")));
@@ -2054,6 +2059,7 @@ function bindEvents() {
   document.querySelector<HTMLElement>("[data-action='cancel-campaign-edit']")?.addEventListener("click", () => {
     state.campaignDirectory.editingId = "";
     state.campaignDirectory.composerOpen = false;
+    state.status = "";
     render();
   });
   document.querySelector<HTMLElement>("[data-action='refresh-calendar']")?.addEventListener("click", () => void loadCalendar(true));
@@ -2337,9 +2343,15 @@ async function loadCampaigns(force = false) {
 
 async function submitCampaign(event: SubmitEvent) {
   event.preventDefault();
+  const form = event.currentTarget as HTMLFormElement;
+  const editingId = state.campaignDirectory.editingId;
+  const submitButton = form.querySelector<HTMLButtonElement>("button[type='submit']");
+  const errorBox = form.querySelector<HTMLElement>("[data-campaign-form-error]");
+  const errorCopy = form.querySelector<HTMLElement>("[data-campaign-form-error-copy]");
+  const idleButtonLabel = editingId ? "Save changes" : "Publish campaign";
+  if (errorBox) errorBox.hidden = true;
+  if (errorCopy) errorCopy.textContent = "";
   try {
-    const form = event.currentTarget as HTMLFormElement;
-    const editingId = state.campaignDirectory.editingId;
     const values = new FormData(form);
     const selectedTaskIds = values.getAll("taskIds").map(String);
     const customTask = {
@@ -2352,7 +2364,12 @@ async function submitCampaign(event: SubmitEvent) {
     };
     const hasCustomTask = Object.values(customTask).some((value) => Array.isArray(value) ? value.length > 0 : Boolean(value.trim()));
     if (selectedTaskIds.length + (hasCustomTask ? 1 : 0) > 4) throw new Error("Choose no more than four campaign checks in total.");
-    setBusy(editingId ? "Saving campaign changes..." : "Publishing campaign...");
+    state.busy = true;
+    state.status = editingId ? "Saving campaign changes..." : "Publishing campaign...";
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = editingId ? "Saving..." : "Publishing...";
+    }
     const response = await fetch(`/api/campaigns${editingId ? `?id=${encodeURIComponent(editingId)}` : ""}`, {
       method: editingId ? "PUT" : "POST",
       credentials: "same-origin",
@@ -2380,7 +2397,15 @@ async function submitCampaign(event: SubmitEvent) {
   } catch (error) {
     state.busy = false;
     state.status = errorMessage(error);
-    render();
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = idleButtonLabel;
+    }
+    if (errorCopy) errorCopy.textContent = state.status;
+    if (errorBox) {
+      errorBox.hidden = false;
+      errorBox.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "nearest" });
+    }
   }
 }
 
@@ -2389,6 +2414,7 @@ function openCampaignEditor(campaignId: string) {
   if (!campaign) return;
   state.campaignDirectory.editingId = campaignId;
   state.campaignDirectory.composerOpen = true;
+  state.status = "";
   if (state.route !== "explore") {
     location.hash = "#explore";
     window.setTimeout(() => document.querySelector<HTMLElement>(".campaign-studio")?.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" }), 50);
