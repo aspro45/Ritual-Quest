@@ -115,7 +115,7 @@ function publicEvent(record, session) {
   };
 }
 
-function cleanEventPayload(request, { requireFuture = false } = {}) {
+function cleanEventPayload(request) {
   const body = request.body && typeof request.body === "object" ? request.body : {};
   const title = cleanText(body.title, 100);
   const description = cleanText(body.description, 1000);
@@ -127,9 +127,6 @@ function cleanEventPayload(request, { requireFuture = false } = {}) {
   const endsAt = isoDate(body.endsAt);
   if (!title || !url || !startsAt || !endsAt || Date.parse(endsAt) <= Date.parse(startsAt)) {
     throw new RequestError("Title, event link, start time, and a later end time are required.");
-  }
-  if (requireFuture && Date.parse(startsAt) < Date.now() - 1000 * 60 * 5) {
-    throw new RequestError("Events must start in the future.");
   }
   if (rawImageUrl && !imageUrl) throw new RequestError("Event image must use a valid public HTTPS URL.");
   return { title, description, location, url, imageUrl, startsAt, endsAt };
@@ -243,7 +240,7 @@ function assertOwner(record, session) {
 }
 
 async function createEvent(request, session) {
-  const values = cleanEventPayload(request, { requireFuture: true });
+  const values = cleanEventPayload(request);
   if (storageMode() !== "supabase") {
     const event = normalizeEventRecord({
       id: crypto.randomUUID(),

@@ -151,6 +151,8 @@ type CalendarFeed = {
   events: CalendarEvent[];
 };
 
+type CalendarDraft = Pick<CalendarEvent, "title" | "startsAt" | "endsAt" | "description" | "location" | "url" | "imageUrl">;
+
 type CampaignTask = {
   id: string;
   templateId?: string;
@@ -495,7 +497,7 @@ const state: {
   following: string[];
   campaignDirectory: { loading: boolean; loaded: boolean; error: string; composerOpen: boolean; editingId: string; feed?: CampaignDirectoryFeed };
   blog: { loading: boolean; loaded: boolean; error: string; feed?: RitualBlogFeed };
-  calendar: { loading: boolean; loaded: boolean; error: string; weekOffset: number; view: CalendarView; filter: CalendarFilter; query: string; editingId: string; feed?: CalendarFeed };
+  calendar: { loading: boolean; loaded: boolean; error: string; formError: string; weekOffset: number; view: CalendarView; filter: CalendarFilter; query: string; editingId: string; draft?: CalendarDraft; feed?: CalendarFeed };
   review: { loading: boolean; loaded: boolean; error: string; queue: ReviewRequest[] };
   busy: boolean;
   status: string;
@@ -516,7 +518,7 @@ const state: {
   following: loadFollowing(),
   campaignDirectory: { loading: false, loaded: false, error: "", composerOpen: false, editingId: "" },
   blog: { loading: false, loaded: false, error: "" },
-  calendar: { loading: false, loaded: false, error: "", weekOffset: 0, view: "schedule", filter: "all", query: "", editingId: "" },
+  calendar: { loading: false, loaded: false, error: "", formError: "", weekOffset: 0, view: "schedule", filter: "all", query: "", editingId: "" },
   review: { loading: false, loaded: false, error: "", queue: [] },
   busy: false,
   status: ""
@@ -1645,6 +1647,7 @@ function renderCalendar() {
 function renderCalendarComposer() {
   const editingEvent = state.calendar.feed?.events.find((event) => event.id === state.calendar.editingId && event.canManage);
   const editing = Boolean(editingEvent);
+  const draft = editingEvent || state.calendar.draft;
   return `
     <section class="event-composer" id="event-composer">
       <div>
@@ -1653,17 +1656,18 @@ function renderCalendarComposer() {
         <p>${editing ? "Only your Discord account can save changes or remove this event." : "Only approved Discord roles can publish. Every saved event is visible to the full community."}</p>
       </div>
       <form data-form="calendar-event">
+        ${state.calendar.formError ? `<div class="event-form-error" role="alert"><strong>Event was not published.</strong><span>${escapeHtml(state.calendar.formError)}</span></div>` : ""}
         <div class="event-composer-fields">
-          <label>Event title<input name="title" maxlength="100" placeholder="Ritual builder session" value="${escapeAttr(editingEvent?.title || "")}" required /></label>
-          <label>Location<input name="location" maxlength="100" placeholder="Discord Stage or city" value="${escapeAttr(editingEvent?.location || "")}" /></label>
-          <label>Starts<input name="startsAt" type="datetime-local" value="${escapeAttr(toLocalDateTimeValue(editingEvent?.startsAt || ""))}" required /></label>
-          <label>Ends<input name="endsAt" type="datetime-local" value="${escapeAttr(toLocalDateTimeValue(editingEvent?.endsAt || ""))}" required /></label>
-          <label>Event link<input name="url" type="url" placeholder="https://..." value="${escapeAttr(editingEvent?.url || "")}" required /></label>
+          <label>Event title<input name="title" maxlength="100" placeholder="Ritual builder session" value="${escapeAttr(draft?.title || "")}" required /></label>
+          <label>Location<input name="location" maxlength="100" placeholder="Discord Stage or city" value="${escapeAttr(draft?.location || "")}" /></label>
+          <label>Starts<input name="startsAt" type="datetime-local" value="${escapeAttr(toLocalDateTimeValue(draft?.startsAt || ""))}" required /></label>
+          <label>Ends<input name="endsAt" type="datetime-local" value="${escapeAttr(toLocalDateTimeValue(draft?.endsAt || ""))}" required /></label>
+          <label>Event link<input name="url" type="url" placeholder="https://..." value="${escapeAttr(draft?.url || "")}" required /></label>
           <div class="event-image-field image-url-field">
-            <label>Cover image URL <small>Public HTTPS image</small><input name="imageUrl" type="url" inputmode="url" placeholder="https://.../event-cover.jpg" value="${escapeAttr(editingEvent?.imageUrl || "")}" /></label>
+            <label>Cover image URL <small>Public HTTPS image</small><input name="imageUrl" type="url" inputmode="url" placeholder="https://.../event-cover.jpg" value="${escapeAttr(draft?.imageUrl || "")}" /></label>
             ${renderImageUrlGuide("data-event-cover-status", "Community artwork")}
           </div>
-          <label class="event-description">Event details<textarea name="description" maxlength="1000" rows="4" placeholder="Tell members what the session covers and what they should prepare.">${escapeHtml(editingEvent?.description || "")}</textarea></label>
+          <label class="event-description">Event details<textarea name="description" maxlength="1000" rows="4" placeholder="Tell members what the session covers and what they should prepare.">${escapeHtml(draft?.description || "")}</textarea></label>
           <div class="event-composer-actions">
             ${editing ? `<button class="quiet-cta" type="button" data-action="cancel-event-edit">${inlineIcon(X, "event-action-icon", 15)} Cancel</button>` : ""}
             <button class="primary-cta" type="submit">${editing ? "Save changes" : "Publish event"}</button>
@@ -1672,10 +1676,10 @@ function renderCalendarComposer() {
         <aside class="event-draft-preview" aria-label="Event preview">
           <span>Event preview</span>
           <figure>
-            <img data-event-image-preview src="${escapeAttr(editingEvent?.imageUrl || CATEGORY_ART.Community)}" alt="" />
+            <img data-event-image-preview src="${escapeAttr(draft?.imageUrl || CATEGORY_ART.Community)}" alt="" />
             <time data-event-date-preview>Date and time</time>
           </figure>
-          <strong data-event-title-preview>${escapeHtml(editingEvent?.title || "Untitled event")}</strong>
+          <strong data-event-title-preview>${escapeHtml(draft?.title || "Untitled event")}</strong>
           <small>Cover, title, and schedule will appear in Calendar.</small>
         </aside>
       </form>
@@ -2055,6 +2059,8 @@ function bindEvents() {
   document.querySelector<HTMLElement>("[data-action='refresh-calendar']")?.addEventListener("click", () => void loadCalendar(true));
   document.querySelector<HTMLElement>("[data-action='open-event-composer']")?.addEventListener("click", () => {
     state.calendar.editingId = "";
+    state.calendar.draft = undefined;
+    state.calendar.formError = "";
     render();
     document.querySelector<HTMLElement>("#event-composer")?.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
   });
@@ -2062,6 +2068,8 @@ function bindEvents() {
   document.querySelectorAll<HTMLElement>("[data-action='delete-event']").forEach((button) => button.addEventListener("click", () => void deleteCalendarEvent(button.dataset.event || "")));
   document.querySelector<HTMLElement>("[data-action='cancel-event-edit']")?.addEventListener("click", () => {
     state.calendar.editingId = "";
+    state.calendar.draft = undefined;
+    state.calendar.formError = "";
     render();
   });
   document.querySelector<HTMLElement>("[data-action='calendar-previous']")?.addEventListener("click", () => { state.calendar.weekOffset -= 1; render(); });
@@ -2480,20 +2488,25 @@ async function submitCalendarEvent(event: SubmitEvent) {
     const values = new FormData(form);
     const startsAt = String(values.get("startsAt") || "");
     const endsAt = String(values.get("endsAt") || "");
-    if (!startsAt || !endsAt || Date.parse(endsAt) <= Date.parse(startsAt)) throw new Error("Choose an end time after the start time.");
+    const draft: CalendarDraft = {
+      title: String(values.get("title") || ""),
+      startsAt: startsAt && !Number.isNaN(Date.parse(startsAt)) ? new Date(startsAt).toISOString() : "",
+      endsAt: endsAt && !Number.isNaN(Date.parse(endsAt)) ? new Date(endsAt).toISOString() : "",
+      location: String(values.get("location") || ""),
+      url: String(values.get("url") || ""),
+      imageUrl: String(values.get("imageUrl") || ""),
+      description: String(values.get("description") || "")
+    };
+    state.calendar.draft = draft;
+    state.calendar.formError = "";
+    if (!draft.startsAt || !draft.endsAt || Date.parse(draft.endsAt) <= Date.parse(draft.startsAt)) throw new Error("Choose an end time after the start time.");
     setBusy(editingId ? "Saving event changes..." : "Publishing calendar event...");
     const response = await fetch(`/api/calendar${editingId ? `?id=${encodeURIComponent(editingId)}` : ""}`, {
       method: editingId ? "PUT" : "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        title: String(values.get("title") || ""),
-        startsAt: new Date(startsAt).toISOString(),
-        endsAt: new Date(endsAt).toISOString(),
-        location: String(values.get("location") || ""),
-        url: String(values.get("url") || ""),
-        imageUrl: String(values.get("imageUrl") || ""),
-        description: String(values.get("description") || "")
+        ...draft
       })
     });
     const payload = await response.json().catch(() => ({}));
@@ -2501,12 +2514,17 @@ async function submitCalendarEvent(event: SubmitEvent) {
     state.status = editingId ? "Event changes saved." : "Event published to the shared calendar.";
     state.busy = false;
     state.calendar.editingId = "";
+    state.calendar.draft = undefined;
+    state.calendar.formError = "";
     state.calendar.loaded = false;
     await loadCalendar(true);
   } catch (error) {
+    const message = errorMessage(error);
     state.busy = false;
-    state.status = errorMessage(error);
+    state.status = `Event was not published: ${message}`;
+    state.calendar.formError = message;
     render();
+    document.querySelector<HTMLElement>(".event-form-error")?.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "center" });
   }
 }
 
@@ -2514,6 +2532,8 @@ function openEventEditor(eventId: string) {
   const event = state.calendar.feed?.events.find((item) => item.id === eventId && item.canManage);
   if (!event) return;
   state.calendar.editingId = eventId;
+  state.calendar.draft = undefined;
+  state.calendar.formError = "";
   render();
   document.querySelector<HTMLElement>("#event-composer")?.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth", block: "start" });
 }

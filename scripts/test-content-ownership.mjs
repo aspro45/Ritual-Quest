@@ -45,8 +45,8 @@ async function invoke(handler, { method = "GET", body = {}, query = {}, cookie =
   return result;
 }
 
-const startsAt = new Date(Date.now() + 3_600_000).toISOString();
-const endsAt = new Date(Date.now() + 7_200_000).toISOString();
+const startsAt = new Date(Date.now() - 3_600_000).toISOString();
+const endsAt = new Date(Date.now() + 3_600_000).toISOString();
 const eventUrl = "https://example.com/ritual-event";
 const createdEvent = await invoke(calendar, {
   method: "POST",
@@ -150,7 +150,7 @@ try {
 console.log(JSON.stringify({
   status: "PASS",
   checks: [
-    "calendar creator can edit and delete",
+    "calendar creator can publish an ongoing event, edit it, and delete it",
     "calendar non-creator receives 403",
     "campaign creator can edit and delete",
     "campaign non-creator receives 403"
