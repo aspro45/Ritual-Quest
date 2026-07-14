@@ -1,8 +1,8 @@
-# Ritual ProofGraph
+# Ritual Quest
 
 A builder reputation layer for Ritual.
 
-**Live app:** [ritual-proofgraph.vercel.app](https://ritual-proofgraph.vercel.app/)
+**Live app:** [ritual-quest.vercel.app](https://ritual-quest.vercel.app/)
 
 ProofGraph connects three signals that usually stay separated: wallet activity, Discord identity, and public X participation. The app verifies Ritual onchain activity, links Discord through OAuth, keeps X as a public evidence URL, and can anchor verified receipts through an onchain registry.
 

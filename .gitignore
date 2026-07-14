@@ -12,3 +12,5 @@ output/
 *.tsbuildinfo
 .codex-backups/
 .playwright-cli/
+
+.vercel
