@@ -1,0 +1,13 @@
+{
+  "contract": "ProofReviewDecisions",
+  "address": "0x7aF5A4eEfb33476bA0d6d27f2F8b9e1176Bf3489",
+  "deployTx": "0x0d666664ee10e75a14296eda847404c5f38517419ff3e926a8838f6a882e409d",
+  "deployBlock": 45719473,
+  "registry": "0x8Da167b58b4574762217BF184D62F2397321cB2C",
+  "coordinatorGrantTx": "0x85abe730e9569468712bdc1956a8a96c4507990dc8dab656a93ac7bd65149093",
+  "directAttestorRevokeTx": "0x9712f7b695b411671f6d5d8ee41cc805a231267d25f4cbe05f6deab95e6e8e8e",
+  "deployer": "0xf6d02F13D7BB5fC24aB6A3D662619641958A3Cf6",
+  "initialAttestor": "0xf6d02F13D7BB5fC24aB6A3D662619641958A3Cf6",
+  "gasUsed": "689866",
+  "chainId": 1979
+}

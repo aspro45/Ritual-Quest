@@ -1,0 +1,14 @@
+.env
+.env.local
+.vercel
+artifacts/
+dist/
+node_modules/
+.local-data/
+cache/
+coverage/
+output/
+*.local.json
+*.tsbuildinfo
+.codex-backups/
+.playwright-cli/

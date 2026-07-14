@@ -1,0 +1,39 @@
+{
+  "name": "ritual-proofgraph",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "node scripts/api-server.mjs",
+    "dev:full": "node scripts/dev-full.mjs",
+    "build": "tsc && vite build",
+    "compile": "node scripts/compile.mjs",
+    "test": "node scripts/test.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "deploy:review-decisions": "node scripts/deploy-review-decisions.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@rainbow-me/rainbowkit": "^2.2.11",
+    "@tanstack/react-query": "^5.101.2",
+    "ethers": "^6.13.5",
+    "gsap": "^3.15.0",
+    "lucide": "^1.24.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.179.1",
+    "viem": "^2.54.3",
+    "wagmi": "^2.19.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@types/three": "^0.179.0",
+    "dotenv": "^16.4.7",
+    "ganache": "^7.9.2",
+    "solc": "^0.8.28",
+    "typescript": "^5.8.3",
+    "vite": "^6.4.3"
+  }
+}

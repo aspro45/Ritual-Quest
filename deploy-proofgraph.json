@@ -1,0 +1,9 @@
+{
+  "contract": "ProofGraphRegistry",
+  "address": "0x8Da167b58b4574762217BF184D62F2397321cB2C",
+  "deployTx": "0xfcdadb42977593569d606fb7b71b0ff1a48c8d30f24650bdcc4d741127f72b8a",
+  "deployer": "0xf6d02F13D7BB5fC24aB6A3D662619641958A3Cf6",
+  "initialAttestor": "0xf6d02F13D7BB5fC24aB6A3D662619641958A3Cf6",
+  "gasUsed": "1490045",
+  "chainId": 1979
+}
