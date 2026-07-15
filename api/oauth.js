@@ -115,7 +115,7 @@ async function readBody(request) {
     try {
       return JSON.parse(request.body);
     } catch {
-      return {};
+      return Object.fromEntries(new URLSearchParams(request.body));
     }
   }
   return {};
@@ -403,11 +403,45 @@ async function xUserReferencedTweet(userId, targetTweetId, accessToken) {
 }
 
 function finish(request, response, returnTo, result) {
+  const currentOrigin = getOrigin(request);
+  let targetOrigin = currentOrigin;
+  try {
+    targetOrigin = new URL(returnTo, currentOrigin).origin;
+  } catch {
+    // oauthReturnTarget already provides a validated fallback.
+  }
+
+  if (!result.error && result.provider === "discord" && targetOrigin !== currentOrigin) {
+    const handoff = seal({
+      kind: "discord-handoff",
+      result,
+      returnTo,
+      expiresAt: Date.now() + 1000 * 60 * 2
+    });
+    const action = `${targetOrigin}/api/oauth?action=handoff`;
+    response.setHeader("set-cookie", clearCookie());
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end(`<!doctype html>
+<html><head><meta charset="utf-8"><title>Ritual Quest OAuth</title></head>
+<body>
+<form id="oauth-handoff" method="post" action=${JSON.stringify(action)}>
+  <input type="hidden" name="token" value=${JSON.stringify(handoff)}>
+</form>
+<script>document.getElementById("oauth-handoff").submit();</script>
+OAuth complete. Returning to Ritual Quest...
+</body></html>`);
+    return;
+  }
+
+  return finishHere(request, response, returnTo, result);
+}
+
+function finishHere(request, response, returnTo, result) {
   const sessionCookie = createDiscordSessionCookie(request, result);
   response.setHeader("set-cookie", sessionCookie ? [clearCookie(), sessionCookie] : clearCookie());
   response.setHeader("content-type", "text/html; charset=utf-8");
   response.end(`<!doctype html>
-<html><head><meta charset="utf-8"><title>Ritual ProofGraph OAuth</title></head>
+<html><head><meta charset="utf-8"><title>Ritual Quest OAuth</title></head>
 <body>
 <script>
   const result = ${JSON.stringify(result).replace(/</g, "\\u003c")};
@@ -415,8 +449,27 @@ function finish(request, response, returnTo, result) {
   if (result.error) localStorage.setItem("proofgraph.oauth.error", JSON.stringify(result));
   location.replace(${JSON.stringify(returnTo || "/#verify")});
 </script>
-OAuth complete. Returning to Ritual ProofGraph...
+OAuth complete. Returning to Ritual Quest...
 </body></html>`);
+}
+
+async function completeHandoff(request, response) {
+  try {
+    const body = await readBody(request);
+    const saved = unseal(body.token);
+    if (saved.kind !== "discord-handoff" || Number(saved.expiresAt || 0) < Date.now()) {
+      throw new Error("OAuth handoff expired");
+    }
+    const returnTo = oauthReturnTarget(request, saved.returnTo);
+    return finishHere(request, response, returnTo, saved.result);
+  } catch (error) {
+    const returnTo = oauthReturnTarget(request);
+    return finishHere(request, response, returnTo, {
+      provider: "discord",
+      error: error.message || String(error),
+      verifiedAt: Date.now()
+    });
+  }
 }
 
 export default async function handler(request, response) {
@@ -433,5 +486,6 @@ export default async function handler(request, response) {
   if (action === "config") return json(response, 200, configPayload());
   if (action === "start" && request.method === "POST") return start(request, response, provider);
   if (action === "callback" && request.method === "GET") return callback(request, response, provider);
+  if (action === "handoff" && request.method === "POST") return completeHandoff(request, response);
   return json(response, 404, { error: "Unknown OAuth action" });
 }
