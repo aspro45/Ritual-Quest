@@ -49,7 +49,8 @@ for (const [roleId, roleName] of knownRoles) {
   assert.ok(source.includes(`["${roleId}", "${roleName}"`), `${roleName} must map to ${roleId}`);
 }
 assert.doesNotMatch(source, /roles\.slice\(0,\s*18\)/, "The passport must not truncate Discord roles");
-assert.doesNotMatch(source, /source\.filter\([^\n]+roleById\.has/, "Unknown live Discord roles must not be hidden");
+assert.match(source, /\.filter\(\(roleId\) => \/\^\\d\{15,25\}\$\/\.test\(roleId\) && roleById\.has\(roleId\)\)/, "The passport must show only configured Discord roles");
+assert.doesNotMatch(source, /Discord role \$\{roleId\.slice/, "Unknown Discord roles must not receive a visible fallback label");
 
 for (const envName of [".env", ".env.local"]) {
   const env = await readFile(new URL(`../${envName}`, import.meta.url), "utf8");

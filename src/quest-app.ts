@@ -1289,7 +1289,7 @@ function discordRoleIssue(discord: SocialProof | undefined, roles: string[]) {
   const error = typeof discord.checks.memberFetchError === "string" ? discord.checks.memberFetchError : "";
   if (error) return `Role sync failed: ${error}. Reconnect Discord with role access.`;
   if (discord.checks.guildMember === false) return "Discord linked, but this user is not in the Ritual server.";
-  return "Discord linked. Refresh once to read the current server role list.";
+  return "Discord linked. None of the configured Ritual roles were found on this account.";
 }
 
 function verifiedDiscordRoleIds(discord: SocialProof | undefined) {
@@ -1298,7 +1298,7 @@ function verifiedDiscordRoleIds(discord: SocialProof | undefined) {
   if (!Array.isArray(source)) return [];
   return [...new Set(source
     .map((roleId) => String(roleId).trim())
-    .filter((roleId) => /^\d{15,25}$/.test(roleId)))];
+    .filter((roleId) => /^\d{15,25}$/.test(roleId) && roleById.has(roleId)))];
 }
 
 function hasAttestorRole() {
@@ -2089,7 +2089,8 @@ function sortLabel() {
 }
 
 function renderRole(roleId: string) {
-  const meta = roleById.get(roleId) || { name: `Discord role ${roleId.slice(-6)}`, color: "#cfd6dc" };
+  const meta = roleById.get(roleId);
+  if (!meta) return "";
   return `<span class="role-pill" title="${escapeAttr(roleId)}"><i style="--role:${meta.color}"></i>${escapeHtml(meta.name)}</span>`;
 }
 
