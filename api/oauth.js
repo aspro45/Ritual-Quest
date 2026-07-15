@@ -182,31 +182,39 @@ async function start(request, response, provider) {
 
   const state = crypto.randomBytes(24).toString("hex");
   const codeVerifier = crypto.randomBytes(48).toString("base64url");
+  const saved = {
+    provider,
+    state,
+    wallet,
+    nonce,
+    signature,
+    returnTo,
+    codeVerifier,
+    createdAt: Date.now()
+  };
+
+  if (provider === "discord") {
+    const callbackOrigin = new URL(redirectUri(request, "discord")).origin;
+    if (callbackOrigin !== getOrigin(request)) {
+      return json(response, 200, {
+        bridgeUrl: `${callbackOrigin}/api/oauth?action=bridge&provider=discord`,
+        bridgeToken: seal({
+          kind: "oauth-start-bridge",
+          saved,
+          expiresAt: Date.now() + 1000 * 60 * 2
+        })
+      });
+    }
+  }
+
   const cookie = cookieHeader(
     request,
-    seal({
-      provider,
-      state,
-      wallet,
-      nonce,
-      signature,
-      returnTo,
-      codeVerifier,
-      createdAt: Date.now()
-    })
+    seal(saved)
   );
 
   if (provider === "discord") {
-    const params = new URLSearchParams({
-      client_id: process.env.DISCORD_CLIENT_ID,
-      redirect_uri: redirectUri(request, "discord"),
-      response_type: "code",
-      scope: process.env.DISCORD_GUILD_ID ? "identify guilds.members.read" : "identify",
-      prompt: "consent",
-      state
-    });
     response.setHeader("set-cookie", cookie);
-    return json(response, 200, { url: `${DISCORD_AUTH}?${params.toString()}` });
+    return json(response, 200, { url: discordAuthorizationUrl(request, state) });
   }
 
   const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
@@ -221,6 +229,47 @@ async function start(request, response, provider) {
   });
   response.setHeader("set-cookie", cookie);
   return json(response, 200, { url: `${X_AUTH}?${params.toString()}` });
+}
+
+function discordAuthorizationUrl(request, state) {
+  const params = new URLSearchParams({
+    client_id: process.env.DISCORD_CLIENT_ID,
+    redirect_uri: redirectUri(request, "discord"),
+    response_type: "code",
+    scope: process.env.DISCORD_GUILD_ID ? "identify guilds.members.read" : "identify",
+    prompt: "consent",
+    state
+  });
+  return `${DISCORD_AUTH}?${params.toString()}`;
+}
+
+async function bridgeStart(request, response, provider) {
+  try {
+    const body = await readBody(request);
+    const payload = unseal(body.token);
+    const saved = payload.saved;
+    if (
+      payload.kind !== "oauth-start-bridge"
+      || provider !== "discord"
+      || saved?.provider !== provider
+      || Number(payload.expiresAt || 0) < Date.now()
+      || Date.now() - Number(saved?.createdAt || 0) > 1000 * 60 * 2
+    ) {
+      throw new Error("OAuth start bridge expired");
+    }
+    const recovered = verifyMessage(linkMessage(provider, saved.wallet, saved.nonce), saved.signature);
+    if (recovered.toLowerCase() !== String(saved.wallet).toLowerCase()) {
+      throw new Error("Wallet signature does not match");
+    }
+    const cookie = cookieHeader(request, seal(saved));
+    return redirect(response, discordAuthorizationUrl(request, saved.state), cookie);
+  } catch (error) {
+    return finishHere(request, response, oauthReturnTarget(request), {
+      provider: "discord",
+      error: error.message || String(error),
+      verifiedAt: Date.now()
+    });
+  }
 }
 
 async function callback(request, response, provider) {
@@ -485,6 +534,7 @@ export default async function handler(request, response) {
 
   if (action === "config") return json(response, 200, configPayload());
   if (action === "start" && request.method === "POST") return start(request, response, provider);
+  if (action === "bridge" && request.method === "POST") return bridgeStart(request, response, provider);
   if (action === "callback" && request.method === "GET") return callback(request, response, provider);
   if (action === "handoff" && request.method === "POST") return completeHandoff(request, response);
   return json(response, 404, { error: "Unknown OAuth action" });

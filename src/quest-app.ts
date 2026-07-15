@@ -2685,7 +2685,22 @@ async function startOAuth(provider: "discord" | "x") {
       body: JSON.stringify({ wallet: state.account, nonce, signature, returnTo: `${location.origin}${location.pathname}${location.hash || "#identity"}` })
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.url) throw new Error(payload.error || "OAuth backend is not running. Use npm run dev:full.");
+    if (!response.ok || (!payload.url && !(payload.bridgeUrl && payload.bridgeToken))) {
+      throw new Error(payload.error || "OAuth backend is not running. Use npm run dev:full.");
+    }
+    if (payload.bridgeUrl && payload.bridgeToken) {
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = payload.bridgeUrl;
+      const token = document.createElement("input");
+      token.type = "hidden";
+      token.name = "token";
+      token.value = payload.bridgeToken;
+      form.append(token);
+      document.body.append(form);
+      form.submit();
+      return;
+    }
     location.href = payload.url;
   } catch (error) {
     state.busy = false;
