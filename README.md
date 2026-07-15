@@ -73,6 +73,8 @@ X proof is intentionally kept as a normal public URL in Missions. That avoids re
 
 Use `DISCORD_REQUIRED_ROLE_ID` for one role, or `DISCORD_REQUIRED_ROLE_IDS` for a comma-separated allowlist. A member passes if they hold at least one configured role.
 
+The production reviewer, campaign manager, and event manager allowlists use the same four Ritual roles: Event Manager (`1349043996114161704`), Radiant Ritualist (`1430908117331218442`), Ritualist (`1339006464139984906`), and Mods (`1218322564573822986`). The signed session preserves the complete role-ID snapshot returned by Discord. Known IDs receive their public role labels in the passport; an ID without a configured label remains visible instead of being silently dropped.
+
 ## Role-gated review
 
 The `Review` tab is shown when the wallet-linked Discord account holds one role from `DISCORD_ATTESTOR_ROLE_IDS`. Reviewer wallets do not need to be added to an onchain attestor allowlist.

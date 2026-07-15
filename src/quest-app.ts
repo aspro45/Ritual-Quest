@@ -292,8 +292,8 @@ const roleMeta = [
   ["1511785201687072889", "Active", "#cfd6dc"],
   ["1514370417568256021", "Gifted", "#cfd6dc"],
   ["1518706523948187830", "Genesis 1000", "#cfd6dc"],
-  ["1358735073930772550", "Pledged to Synful", "#cfd6dc"],
-  ["1389560311236792350", "Simplified", "#cfd6dc"],
+  ["1358735073930772550", "Pledge Initiated", "#cfd6dc"],
+  ["1389560311236792350", "Allegiance Encoded", "#cfd6dc"],
   ["1395158156702781531", "#MyRitualChain", "#cfd6dc"],
   ["1210469665541984257", "Server Booster", "#d946ef"],
   ["1516137404342337628", "Academy Trainer", "#cfd6dc"],
@@ -1275,7 +1275,7 @@ function renderIdentity() {
         <span class="member-badge">${socialProofMatchesWallet("discord") ? "verified" : "not linked"}</span>
         <h2>${escapeHtml(discord?.user.displayName || discord?.user.username || "Ritual builder")}</h2>
         <p>${state.account ? shortAddress(state.account) : "Start with wallet connect."}</p>
-        <div class="role-cloud">${roles.length ? roles.slice(0, 18).map(renderRole).join("") : `<span class="role-pill"><i></i>No roles loaded</span>`}</div>
+        <div class="role-cloud">${roles.length ? roles.map(renderRole).join("") : `<span class="role-pill"><i></i>No roles loaded</span>`}</div>
         ${roleIssue ? `<p class="role-hint">${escapeHtml(roleIssue)}</p>` : ""}
         ${state.account ? `<button class="quiet-cta passport-refresh" type="button" data-action="start-oauth" data-provider="discord">Refresh Discord roles</button>` : ""}
       </div>
@@ -1296,7 +1296,9 @@ function verifiedDiscordRoleIds(discord: SocialProof | undefined) {
   if (!discord || Number(discord.checks.roleSnapshotVersion) !== 2) return [];
   const source = discord.checks.memberRoleIds;
   if (!Array.isArray(source)) return [];
-  return [...new Set(source.filter((roleId): roleId is string => typeof roleId === "string" && roleById.has(roleId)))].slice(0, 18);
+  return [...new Set(source
+    .map((roleId) => String(roleId).trim())
+    .filter((roleId) => /^\d{15,25}$/.test(roleId)))];
 }
 
 function hasAttestorRole() {
@@ -2087,7 +2089,7 @@ function sortLabel() {
 }
 
 function renderRole(roleId: string) {
-  const meta = roleById.get(roleId) || { name: "Ritual role", color: "#cfd6dc" };
+  const meta = roleById.get(roleId) || { name: `Discord role ${roleId.slice(-6)}`, color: "#cfd6dc" };
   return `<span class="role-pill" title="${escapeAttr(roleId)}"><i style="--role:${meta.color}"></i>${escapeHtml(meta.name)}</span>`;
 }
 

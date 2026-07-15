@@ -11,7 +11,9 @@
     "compile": "node scripts/compile.mjs",
     "test": "node scripts/test.mjs",
     "test:oauth": "node scripts/test-oauth-handoff.mjs",
+    "test:discord-roles": "node scripts/test-discord-roles.mjs",
     "test:review-access": "node scripts/test-review-access.mjs",
+    "audit:chain": "node scripts/audit-chain.mjs",
     "deploy": "node scripts/deploy.mjs",
     "deploy:review-decisions": "node scripts/deploy-review-decisions.mjs",
     "preview": "vite preview"
