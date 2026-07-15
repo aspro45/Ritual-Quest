@@ -94,7 +94,7 @@ type ReviewRejection = {
 
 type OAuthConfig = {
   discord: { enabled: boolean; guildIdConfigured: boolean; requiredRoleConfigured: boolean; requiredRoleCount?: number };
-  attestor: { roleIds: string[]; roleConfigured: boolean; roleCount: number };
+  attestor: { roleIds: string[]; roleConfigured: boolean; roleCount: number; wallets: string[]; walletConfigured: boolean; walletCount: number };
   x: { enabled: boolean; targetUserConfigured: boolean; targetTweetConfigured: boolean };
   warning?: string;
 };
@@ -1308,12 +1308,19 @@ function hasAttestorRole() {
   return allowed.some((roleId) => memberRoles.includes(roleId));
 }
 
+function hasAttestorWallet() {
+  if (!state.account) return false;
+  const allowed = state.oauthConfig?.attestor.wallets || [];
+  return allowed.some((wallet) => wallet.toLowerCase() === state.account.toLowerCase());
+}
+
 function canAccessReview() {
-  return Boolean(state.account && hasAttestorRole());
+  return Boolean(state.account && (hasAttestorWallet() || hasAttestorRole()));
 }
 
 function reviewAccessMessage() {
   if (!state.account) return "Connect your wallet first.";
+  if (hasAttestorWallet()) return "This wallet has reviewer access.";
   if (!socialProofMatchesWallet("discord")) return "Connect Discord on this wallet to check reviewer access.";
   if (!state.oauthConfig?.attestor.roleConfigured) return "No reviewer role IDs are configured yet.";
   if (!hasAttestorRole()) return "This Discord account does not have a reviewer role.";
@@ -3140,15 +3147,47 @@ async function writeRegistry(functionName: string, args: readonly unknown[]) {
 }
 
 async function postReviewDecision(payload: Record<string, unknown>) {
+  const reviewerWallet = state.account;
+  const body: Record<string, unknown> = { ...payload, reviewerWallet };
+  if (hasAttestorWallet()) {
+    const wallet = requireRainbowWallet();
+    const authorizationExpiresAt = Date.now() + 1000 * 60 * 2;
+    const message = reviewAuthorizationMessage(body, authorizationExpiresAt);
+    const reviewerSignature = await wallet.signMessage?.(message);
+    if (!reviewerSignature) throw new Error("RainbowKit signer is not ready.");
+    body.authorizationExpiresAt = authorizationExpiresAt;
+    body.reviewerSignature = reviewerSignature;
+  }
   const response = await fetch("/api/reviews", {
     method: "POST",
     credentials: "same-origin",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...payload, reviewerWallet: state.account })
+    body: JSON.stringify(body)
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || `Review service returned ${response.status}.`);
   return result;
+}
+
+function reviewAuthorizationMessage(payload: Record<string, unknown>, expiresAt: number) {
+  let evidenceUri = String(payload.evidenceUri || "");
+  try {
+    evidenceUri = new URL(evidenceUri).toString();
+  } catch {
+    // The API will return the validation error for a malformed evidence URL.
+  }
+  return [
+    "Ritual Quest review decision",
+    `Reviewer: ${String(payload.reviewerWallet || "").toLowerCase()}`,
+    `Action: ${String(payload.action || "")}`,
+    `Builder: ${String(payload.builder || "").toLowerCase()}`,
+    `Proof type: ${String(payload.proofType || "").toLowerCase()}`,
+    `Proof hash: ${String(payload.proofHash || "").toLowerCase()}`,
+    `Task: ${String(payload.taskId || "")}`,
+    `Evidence: ${evidenceUri}`,
+    `Reason: ${String(payload.reason || "").trim().replace(/\s+/g, " ")}`,
+    `Expires: ${expiresAt}`
+  ].join("\n");
 }
 
 async function loadOAuthConfig() {
@@ -3159,7 +3198,7 @@ async function loadOAuthConfig() {
   } catch {
     state.oauthConfig = {
       discord: { enabled: false, guildIdConfigured: false, requiredRoleConfigured: false },
-      attestor: { roleIds: [], roleConfigured: false, roleCount: 0 },
+      attestor: { roleIds: [], roleConfigured: false, roleCount: 0, wallets: [], walletConfigured: false, walletCount: 0 },
       x: { enabled: false, targetUserConfigured: false, targetTweetConfigured: false },
       warning: "Run npm run dev:full to enable OAuth."
     };

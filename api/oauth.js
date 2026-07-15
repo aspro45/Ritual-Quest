@@ -124,6 +124,7 @@ async function readBody(request) {
 function configPayload() {
   const requiredRoleIds = discordRequiredRoleIds();
   const attestorRoleIds = discordAttestorRoleIds();
+  const attestorWallets = reviewerWallets();
   return {
     discord: {
       enabled: Boolean(process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET),
@@ -134,7 +135,10 @@ function configPayload() {
     attestor: {
       roleIds: attestorRoleIds,
       roleConfigured: attestorRoleIds.length > 0,
-      roleCount: attestorRoleIds.length
+      roleCount: attestorRoleIds.length,
+      wallets: attestorWallets,
+      walletConfigured: attestorWallets.length > 0,
+      walletCount: attestorWallets.length
     },
     x: {
       enabled: Boolean(process.env.X_CLIENT_ID),
@@ -151,6 +155,13 @@ function discordRequiredRoleIds() {
 
 function discordAttestorRoleIds() {
   return discordRoleIds(process.env.DISCORD_ATTESTOR_ROLE_ID, process.env.DISCORD_ATTESTOR_ROLE_IDS);
+}
+
+function reviewerWallets() {
+  return String(process.env.DISCORD_ATTESTOR_WALLETS || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter((value, index, all) => isAddress(value) && all.indexOf(value) === index);
 }
 
 function discordRoleIds(...values) {

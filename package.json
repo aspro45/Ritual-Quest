@@ -11,6 +11,7 @@
     "compile": "node scripts/compile.mjs",
     "test": "node scripts/test.mjs",
     "test:oauth": "node scripts/test-oauth-handoff.mjs",
+    "test:review-access": "node scripts/test-review-access.mjs",
     "deploy": "node scripts/deploy.mjs",
     "deploy:review-decisions": "node scripts/deploy-review-decisions.mjs",
     "preview": "vite preview"

@@ -1,4 +1,4 @@
-import { Contract, JsonRpcProvider, Wallet, isAddress, keccak256, toUtf8Bytes } from "ethers";
+import { Contract, JsonRpcProvider, Wallet, isAddress, keccak256, toUtf8Bytes, verifyMessage } from "ethers";
 import { canUseDiscordSessions, readDiscordSession } from "./discord-session.js";
 
 const REVIEW_TASK_POINTS = new Map([
@@ -34,6 +34,13 @@ function reviewerRoleIds() {
     .filter((role, index, all) => /^\d{15,25}$/.test(role) && all.indexOf(role) === index);
 }
 
+function reviewerWallets() {
+  return String(process.env.DISCORD_ATTESTOR_WALLETS || "")
+    .split(",")
+    .map((wallet) => wallet.trim().toLowerCase())
+    .filter((wallet, index, all) => isAddress(wallet) && all.indexOf(wallet) === index);
+}
+
 function relayConfig() {
   const rpcUrl = String(process.env.RITUAL_RPC_URL || process.env.VITE_RITUAL_RPC_URL || "").trim();
   const chainId = Number(process.env.RITUAL_CHAIN_ID || process.env.VITE_RITUAL_CHAIN_ID || 1979);
@@ -61,6 +68,34 @@ function json(response, status, payload) {
 
 function hasReviewerRole(session, roles) {
   return Boolean(session && roles.length && session.roles.some((role) => roles.includes(role)));
+}
+
+export function reviewAuthorizationMessage(values, expiresAt) {
+  return [
+    "Ritual Quest review decision",
+    `Reviewer: ${values.reviewerWallet}`,
+    `Action: ${values.action}`,
+    `Builder: ${values.builder.toLowerCase()}`,
+    `Proof type: ${values.proofType.toLowerCase()}`,
+    `Proof hash: ${values.proofHash.toLowerCase()}`,
+    `Task: ${values.taskId}`,
+    `Evidence: ${values.evidenceUri}`,
+    `Reason: ${values.reason}`,
+    `Expires: ${expiresAt}`
+  ].join("\n");
+}
+
+export function hasWalletAuthorization(body, values, wallets) {
+  if (!wallets.includes(values.reviewerWallet)) return false;
+  const expiresAt = Number(body.authorizationExpiresAt || 0);
+  const signature = String(body.reviewerSignature || "");
+  const now = Date.now();
+  if (!Number.isSafeInteger(expiresAt) || expiresAt < now || expiresAt > now + 1000 * 60 * 5 || !signature) return false;
+  try {
+    return verifyMessage(reviewAuthorizationMessage(values, expiresAt), signature).toLowerCase() === values.reviewerWallet;
+  } catch {
+    return false;
+  }
 }
 
 function cleanHex(value) {
@@ -116,6 +151,7 @@ function cleanDecisionPayload(request) {
     proofHash,
     evidenceUri,
     reason,
+    taskId,
     points: REVIEW_TASK_POINTS.get(template)
   };
 }
@@ -168,27 +204,30 @@ export default async function reviews(request, response) {
 
   const session = readDiscordSession(request);
   const roles = reviewerRoleIds();
-  const canReview = hasReviewerRole(session, roles);
+  const wallets = reviewerWallets();
+  const requestedWallet = String(request.query?.wallet || "").trim().toLowerCase();
+  const canReview = hasReviewerRole(session, roles) || wallets.includes(requestedWallet);
   const relay = relayConfig();
 
   if (request.method === "GET") {
     return json(response, 200, {
       canReview,
       roleConfigured: roles.length > 0,
+      walletConfigured: wallets.length > 0,
       relayConfigured: relay.configured,
       sessionConfigured: canUseDiscordSessions()
     });
   }
   if (request.method !== "POST") return json(response, 405, { error: "Method not allowed" });
-  if (!canUseDiscordSessions()) return json(response, 503, { error: "Discord sessions are not configured." });
-  if (!session) return json(response, 401, { error: "Link Discord again before reviewing evidence." });
-  if (!roles.length) return json(response, 503, { error: "No reviewer roles are configured." });
-  if (!canReview) return json(response, 403, { error: "Your Discord roles do not include review access." });
+  if (!roles.length && !wallets.length) return json(response, 503, { error: "No reviewer access is configured." });
 
   try {
     const values = cleanDecisionPayload(request);
-    if (!session.wallet || session.wallet !== values.reviewerWallet) {
-      throw new RequestError("Reconnect Discord with the wallet currently open in RainbowKit.", 403);
+    const body = request.body && typeof request.body === "object" ? request.body : {};
+    const roleAuthorized = hasReviewerRole(session, roles) && session.wallet === values.reviewerWallet;
+    const walletAuthorized = hasWalletAuthorization(body, values, wallets);
+    if (!roleAuthorized && !walletAuthorized) {
+      throw new RequestError("Reviewer access requires an approved Discord role or an authorized reviewer wallet signature.", 403);
     }
     const result = await writeDecision(values);
     return json(response, 200, { ok: true, action: values.action, ...result });
