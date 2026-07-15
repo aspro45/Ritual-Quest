@@ -1,6 +1,6 @@
 import { Contract, JsonRpcProvider, ethers, formatEther, isAddress, keccak256, toUtf8Bytes } from "ethers";
 import gsap from "gsap";
-import { ArrowRight, AtSign, Check, CircleDashed, ExternalLink, Image as ImageIcon, LockKeyhole, MessageCircle, Pencil, Search, Send, Trash2, Users, X, createElement } from "lucide";
+import { ArrowRight, AtSign, Check, CircleDashed, ExternalLink, Image as ImageIcon, LockKeyhole, MessageCircle, Pencil, Plus, Search, Send, Trash2, Users, X, createElement } from "lucide";
 import * as THREE from "three";
 import { parseAbi } from "viem";
 import { getRainbowWallet, mountRainbowKit } from "./wallet-rainbow";
@@ -172,8 +172,12 @@ type CustomSocialTask = {
   title: string;
   instructions: string;
   accounts: string[];
-  postUrl: string;
-  engagements: string[];
+  posts: Array<{
+    url: string;
+    engagements: string[];
+  }>;
+  postUrl?: string;
+  engagements?: string[];
   postPrompt: string;
   verification: "self-attested";
   timerSeconds: number;
@@ -718,12 +722,42 @@ function renderImageUrlGuide(statusAttribute: string, fallbackLabel: string) {
   `;
 }
 
+function socialPostTargets(task?: CustomSocialTask | null) {
+  const modern = Array.isArray(task?.posts) ? task.posts : [];
+  const legacy = task?.postUrl ? [{ url: task.postUrl, engagements: task.engagements || [] }] : [];
+  const targets = (modern.length ? modern : legacy)
+    .filter((target) => target && typeof target === "object")
+    .slice(0, 5)
+    .map((target) => ({
+      url: String(target.url || ""),
+      engagements: Array.isArray(target.engagements) ? target.engagements.filter((item) => ["like", "repost", "reply"].includes(item)) : []
+    }));
+  return targets.length ? targets : [{ url: "", engagements: [] }];
+}
+
+function renderSocialPostTarget(target: { url: string; engagements: string[] }, index: number, total: number) {
+  return `
+    <div class="campaign-post-target" data-post-target>
+      <div class="campaign-post-target-head">
+        <span>Post ${String(index + 1).padStart(2, "0")}</span>
+        <button type="button" data-remove-post aria-label="Remove post ${index + 1}" title="Remove post" ${total === 1 ? "disabled" : ""}>${inlineIcon(Trash2, "campaign-post-remove-icon", 15)}</button>
+      </div>
+      <label>Post URL<input name="customPostUrl" type="url" inputmode="url" placeholder="https://x.com/ritualnet/status/..." value="${escapeAttr(target.url)}" /><small>Paste the full public post URL, not an X profile URL.</small></label>
+      <div class="campaign-engagement-options" aria-label="Actions required on post ${index + 1}">
+        <span>Required actions</span>
+        ${["like", "repost", "reply"].map((engagement) => `<label><input type="checkbox" name="customPostEngagement" value="${engagement}" ${target.engagements.includes(engagement) ? "checked" : ""} /> ${engagement[0].toUpperCase()}${engagement.slice(1)}</label>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderCampaignComposer() {
   const storageReady = Boolean(state.campaignDirectory.feed?.configured);
   const editingCampaign = state.campaignDirectory.feed?.campaigns.find((campaign) => campaign.id === state.campaignDirectory.editingId && campaign.canManage);
   const editing = Boolean(editingCampaign);
   const selectedTaskIds = new Set(editingCampaign?.taskIds || ["chain-activity", "build-log"]);
   const customTask = editingCampaign?.customTask || null;
+  const postTargets = socialPostTargets(customTask);
   const selectedCategory = editingCampaign?.category || "Builder";
   const categoryOptions = FILTER_CHIPS.filter((category) => category !== "All")
     .map((category) => `<option value="${escapeAttr(category)}" ${category === selectedCategory ? "selected" : ""}>${escapeHtml(category)}</option>`)
@@ -797,12 +831,11 @@ function renderCampaignComposer() {
 
                 <article class="campaign-x-task" data-x-task="engage">
                   <div class="campaign-x-task-icon">${inlineIcon(MessageCircle, "campaign-x-icon", 19)}</div>
-                  <div class="campaign-x-task-copy"><span>X action</span><h4>Engage with a post</h4><p>Send participants to one specific public X post.</p></div>
-                  <label>Post to engage with<input name="customPostUrl" type="url" inputmode="url" placeholder="https://x.com/ritualnet/status/..." value="${escapeAttr(customTask?.postUrl || "")}" /><small>Paste the full public post URL, not an X profile URL.</small></label>
-                  <div class="campaign-engagement-options" aria-label="Actions required on the target post">
-                    <span>Required actions</span>
-                    ${["like", "repost", "reply"].map((engagement) => `<label><input type="checkbox" name="customEngagements" value="${engagement}" ${(customTask?.engagements || []).includes(engagement) ? "checked" : ""} /> ${engagement[0].toUpperCase()}${engagement.slice(1)}</label>`).join("")}
+                  <div class="campaign-x-task-copy"><span>X action</span><h4>Engage with posts</h4><p>Add up to five public X posts and choose the action required on each one.</p></div>
+                  <div class="campaign-post-target-list" data-post-target-list>
+                    ${postTargets.map((target, index) => renderSocialPostTarget(target, index, postTargets.length)).join("")}
                   </div>
+                  <button class="campaign-add-post" type="button" data-add-post ${postTargets.length >= 5 ? "disabled" : ""}>${inlineIcon(Plus, "campaign-add-post-icon", 15)}<span>Add post</span><b data-post-limit>${postTargets.length}/5</b></button>
                 </article>
 
                 <article class="campaign-x-task" data-x-task="publish">
@@ -862,8 +895,9 @@ function bindCampaignStudio() {
   const customTitleInput = input("customTitle") as HTMLInputElement | null;
   const customInstructionsInput = input("customInstructions") as HTMLTextAreaElement | null;
   const accountsInput = input("customAccounts") as HTMLInputElement | null;
-  const postUrlInput = input("customPostUrl") as HTMLInputElement | null;
   const postPromptInput = input("customPostPrompt") as HTMLTextAreaElement | null;
+  const postTargetList = form.querySelector<HTMLElement>("[data-post-target-list]");
+  const addPostButton = form.querySelector<HTMLButtonElement>("[data-add-post]");
   const previewImage = form.querySelector<HTMLImageElement>("[data-preview-image]");
   const previewTasks = form.querySelector<HTMLOListElement>("[data-preview-tasks]");
   const accountChips = form.querySelector<HTMLElement>("[data-account-chips]");
@@ -874,6 +908,22 @@ function bindCampaignStudio() {
     coverStatus.dataset.state = stateName;
     const copy = coverStatus.querySelector("span");
     if (copy) copy.textContent = message;
+  };
+
+  const refreshPostTargetControls = () => {
+    const rows = [...form.querySelectorAll<HTMLElement>("[data-post-target]")];
+    rows.forEach((row, index) => {
+      const label = row.querySelector<HTMLElement>(".campaign-post-target-head > span");
+      const removeButton = row.querySelector<HTMLButtonElement>("[data-remove-post]");
+      if (label) label.textContent = `Post ${String(index + 1).padStart(2, "0")}`;
+      if (removeButton) {
+        removeButton.disabled = rows.length === 1;
+        removeButton.setAttribute("aria-label", `Remove post ${index + 1}`);
+      }
+    });
+    if (addPostButton) addPostButton.disabled = rows.length >= 5;
+    const limit = addPostButton?.querySelector<HTMLElement>("[data-post-limit]");
+    if (limit) limit.textContent = `${rows.length}/5`;
   };
 
   const sync = () => {
@@ -906,19 +956,24 @@ function bindCampaignStudio() {
     const accounts = [...new Set(String(accountsInput?.value || "").split(",")
       .map((account) => account.trim().replace(/^@/, "").toLowerCase())
       .filter((account) => /^[a-z0-9_]{1,15}$/.test(account)))].slice(0, 5);
-    const engagementInputs = [...form.querySelectorAll<HTMLInputElement>("input[name='customEngagements']")];
-    const engagements = engagementInputs.filter((item) => item.checked).map((item) => item.value);
-    const postUrl = String(postUrlInput?.value || "").trim();
+    const postTargets = [...form.querySelectorAll<HTMLElement>("[data-post-target]")].map((row) => {
+      const postUrlInput = row.querySelector<HTMLInputElement>("input[name='customPostUrl']");
+      const url = String(postUrlInput?.value || "").trim();
+      const engagements = [...row.querySelectorAll<HTMLInputElement>("input[name='customPostEngagement']:checked")].map((item) => item.value);
+      const validUrl = !url || /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+\/?$/i.test(url);
+      postUrlInput?.setCustomValidity(!validUrl ? "Paste a full public X post URL." : engagements.length > 0 && !url ? "Add the X post these actions apply to." : "");
+      return { url, engagements };
+    });
+    const configuredPosts = postTargets.filter((target) => target.url || target.engagements.length > 0);
+    const validPosts = configuredPosts.filter((target) => target.url);
     const postPrompt = String(postPromptInput?.value || "").trim();
     const customTitle = String(customTitleInput?.value || "").trim();
     const customInstructions = String(customInstructionsInput?.value || "").trim();
-    const hasXAction = accounts.length > 0 || Boolean(postUrl) || engagements.length > 0 || Boolean(postPrompt);
+    const hasXAction = accounts.length > 0 || configuredPosts.length > 0 || Boolean(postPrompt);
     const hasCustomStep = hasXAction || Boolean(customTitle) || Boolean(customInstructions);
-    const validPostUrl = !postUrl || /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+\/?$/i.test(postUrl);
 
     customTitleInput?.setCustomValidity(hasCustomStep && customTitle.length < 3 ? "Add a clear task name." : hasCustomStep && !hasXAction ? "Add at least one X action below." : "");
     customInstructionsInput?.setCustomValidity(hasCustomStep && customInstructions.length < 8 ? "Explain what participants should do." : "");
-    postUrlInput?.setCustomValidity(!validPostUrl ? "Paste a full public X post URL." : engagements.length > 0 && !postUrl ? "Add the X post these actions apply to." : "");
 
     if (accountChips) {
       accountChips.replaceChildren();
@@ -936,7 +991,7 @@ function bindCampaignStudio() {
     }
 
     form.querySelector<HTMLElement>("[data-x-task='follow']")?.classList.toggle("is-active", accounts.length > 0);
-    form.querySelector<HTMLElement>("[data-x-task='engage']")?.classList.toggle("is-active", Boolean(postUrl) || engagements.length > 0);
+    form.querySelector<HTMLElement>("[data-x-task='engage']")?.classList.toggle("is-active", configuredPosts.length > 0);
     form.querySelector<HTMLElement>("[data-x-task='publish']")?.classList.toggle("is-active", Boolean(postPrompt));
 
     const selectedChecks = [...form.querySelectorAll<HTMLInputElement>("input[data-preview-task]:checked")];
@@ -947,7 +1002,7 @@ function bindCampaignStudio() {
       if (task) participantActions.push(task.label);
     });
     if (accounts.length) participantActions.push(`Follow ${accounts.length} X account${accounts.length === 1 ? "" : "s"}`);
-    if (postUrl) participantActions.push(engagements.length ? `${engagements.map((item) => item[0].toUpperCase() + item.slice(1)).join(" + ")} the target post` : "Open the target X post");
+    if (validPosts.length) participantActions.push(`Engage with ${validPosts.length} X post${validPosts.length === 1 ? "" : "s"}`);
     if (postPrompt) participantActions.push("Publish an original X post");
 
     if (previewTasks) {
@@ -971,10 +1026,26 @@ function bindCampaignStudio() {
     setText("[data-preview-count]", `${taskCount} step${taskCount === 1 ? "" : "s"}`);
   };
 
-  form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select").forEach((field) => {
-    field.addEventListener("input", sync);
-    field.addEventListener("change", sync);
+  form.addEventListener("input", sync);
+  form.addEventListener("change", sync);
+  addPostButton?.addEventListener("click", () => {
+    const count = form.querySelectorAll("[data-post-target]").length;
+    if (!postTargetList || count >= 5) return;
+    postTargetList.insertAdjacentHTML("beforeend", renderSocialPostTarget({ url: "", engagements: [] }, count, count + 1));
+    refreshPostTargetControls();
+    sync();
+    postTargetList.querySelectorAll<HTMLInputElement>("input[name='customPostUrl']")[count]?.focus();
   });
+  postTargetList?.addEventListener("click", (event) => {
+    const removeButton = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-remove-post]");
+    if (!removeButton) return;
+    const rows = [...form.querySelectorAll<HTMLElement>("[data-post-target]")];
+    if (rows.length <= 1) return;
+    removeButton.closest<HTMLElement>("[data-post-target]")?.remove();
+    refreshPostTargetControls();
+    sync();
+  });
+  refreshPostTargetControls();
   sync();
 }
 
@@ -1862,12 +1933,22 @@ function customTaskFromApi(campaignId: string, value?: CustomSocialTask | null):
   const title = String(value.title || "").trim();
   const instructions = String(value.instructions || "").trim();
   const accounts = Array.isArray(value.accounts) ? value.accounts.map(String).filter((account) => /^[a-z0-9_]{1,15}$/i.test(account)).slice(0, 5) : [];
-  const postUrl = /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+\/?$/i.test(String(value.postUrl || "")) ? String(value.postUrl) : "";
-  const engagements = Array.isArray(value.engagements) ? value.engagements.map(String).filter((item) => ["like", "repost", "reply"].includes(item)) : [];
+  const rawPosts = Array.isArray(value.posts) && value.posts.length
+    ? value.posts
+    : value.postUrl
+      ? [{ url: value.postUrl, engagements: value.engagements || [] }]
+      : [];
+  const posts = rawPosts.slice(0, 5).map((target) => ({
+    url: /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+\/?$/i.test(String(target?.url || "")) ? String(target.url) : "",
+    engagements: Array.isArray(target?.engagements) ? target.engagements.map(String).filter((item) => ["like", "repost", "reply"].includes(item)) : []
+  })).filter((target) => target.url);
   const postPrompt = String(value.postPrompt || "").trim();
-  if (title.length < 3 || instructions.length < 8 || (!accounts.length && !postUrl && !postPrompt)) return undefined;
+  if (title.length < 3 || instructions.length < 8 || (!accounts.length && !posts.length && !postPrompt)) return undefined;
   const actionLinks = accounts.map((account) => ({ label: `Open @${account}`, url: `https://x.com/${account}` }));
-  if (postUrl) actionLinks.push({ label: engagements.length ? `${engagements.map((item) => item[0].toUpperCase() + item.slice(1)).join(" + ")} target` : "Open target post", url: postUrl });
+  posts.forEach((target, index) => {
+    const actions = target.engagements.length ? target.engagements.map((item) => item[0].toUpperCase() + item.slice(1)).join(" + ") : "Open";
+    actionLinks.push({ label: `${actions} post ${index + 1}`, url: target.url });
+  });
   if (postPrompt) actionLinks.push({ label: "Write post on X", url: `https://x.com/intent/post?text=${encodeURIComponent(postPrompt)}` });
   return {
     id: `${campaignId}:self-social`,
@@ -2354,12 +2435,17 @@ async function submitCampaign(event: SubmitEvent) {
   try {
     const values = new FormData(form);
     const selectedTaskIds = values.getAll("taskIds").map(String);
+    const posts = [...form.querySelectorAll<HTMLElement>("[data-post-target]")]
+      .map((row) => ({
+        url: String(row.querySelector<HTMLInputElement>("input[name='customPostUrl']")?.value || "").trim(),
+        engagements: [...row.querySelectorAll<HTMLInputElement>("input[name='customPostEngagement']:checked")].map((item) => item.value)
+      }))
+      .filter((target) => target.url || target.engagements.length > 0);
     const customTask = {
       title: String(values.get("customTitle") || ""),
       instructions: String(values.get("customInstructions") || ""),
       accounts: String(values.get("customAccounts") || "").split(",").map((account) => account.trim()).filter(Boolean),
-      postUrl: String(values.get("customPostUrl") || ""),
-      engagements: values.getAll("customEngagements").map(String),
+      posts,
       postPrompt: String(values.get("customPostPrompt") || "")
     };
     const hasCustomTask = Object.values(customTask).some((value) => Array.isArray(value) ? value.length > 0 : Boolean(value.trim()));

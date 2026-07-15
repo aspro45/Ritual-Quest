@@ -110,22 +110,45 @@ function normalizeCustomTask(value) {
   const title = cleanText(value.title, 60);
   const instructions = cleanText(value.instructions, 220);
   const postPrompt = cleanText(value.postPrompt, 240);
-  const rawPostUrl = String(value.postUrl || "").trim();
-  const postUrl = cleanXPostUrl(rawPostUrl);
   const accounts = [...new Set((Array.isArray(value.accounts) ? value.accounts : String(value.accounts || "").split(","))
     .map((account) => String(account).trim().replace(/^@/, "").toLowerCase())
     .filter((account) => /^[a-z0-9_]{1,15}$/.test(account)))].slice(0, 5);
-  const engagements = [...new Set((Array.isArray(value.engagements) ? value.engagements : [])
-    .map(String)
-    .filter((engagement) => ["like", "repost", "reply"].includes(engagement)))];
+  const legacyPost = value.postUrl || (Array.isArray(value.engagements) && value.engagements.length)
+    ? [{ url: value.postUrl, engagements: value.engagements }]
+    : [];
+  const rawPosts = Array.isArray(value.posts) ? value.posts : legacyPost;
+  if (rawPosts.length > 5) throw new RequestError("Add no more than five target X posts.");
+  const postMap = new Map();
+  rawPosts.forEach((target) => {
+    if (!target || typeof target !== "object") return;
+    const rawUrl = String(target.url || "").trim();
+    const url = cleanXPostUrl(rawUrl);
+    const engagements = [...new Set((Array.isArray(target.engagements) ? target.engagements : [])
+      .map(String)
+      .filter((engagement) => ["like", "repost", "reply"].includes(engagement)))];
+    if (!rawUrl && !engagements.length) return;
+    if (rawUrl && !url) throw new RequestError("Every target must be a valid public X post URL.");
+    if (engagements.length && !url) throw new RequestError("Add the X post before choosing like, repost, or reply.");
+    const previous = postMap.get(url) || [];
+    postMap.set(url, [...new Set([...previous, ...engagements])]);
+  });
+  const posts = [...postMap.entries()].map(([url, engagements]) => ({ url, engagements }));
 
-  if (!title && !instructions && !postPrompt && !rawPostUrl && !accounts.length && !engagements.length) return null;
+  if (!title && !instructions && !postPrompt && !rawPosts.length && !accounts.length) return null;
   if (title.length < 3) throw new RequestError("Custom quest title must be at least 3 characters.");
   if (instructions.length < 8) throw new RequestError("Custom quest instructions must be at least 8 characters.");
-  if (rawPostUrl && !postUrl) throw new RequestError("Target post must be a valid public X post URL.");
-  if (engagements.length && !postUrl) throw new RequestError("Add a target X post before choosing like, repost, or reply.");
-  if (!accounts.length && !postUrl && !postPrompt) throw new RequestError("Add an X account, target post, or post prompt to the custom quest.");
-  return { title, instructions, accounts, postUrl, engagements, postPrompt, verification: "self-attested", timerSeconds: 60 };
+  if (!accounts.length && !posts.length && !postPrompt) throw new RequestError("Add an X account, target post, or post prompt to the custom quest.");
+  return {
+    title,
+    instructions,
+    accounts,
+    posts,
+    postUrl: posts[0]?.url || "",
+    engagements: posts[0]?.engagements || [],
+    postPrompt,
+    verification: "self-attested",
+    timerSeconds: 60
+  };
 }
 
 function campaignSlug(title) {

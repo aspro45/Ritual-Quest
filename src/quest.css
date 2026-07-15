@@ -5024,8 +5024,102 @@ body {
 
 .campaign-x-task > label,
 .campaign-x-task > .campaign-engagement-options,
-.campaign-x-task > .campaign-account-chips {
+.campaign-x-task > .campaign-account-chips,
+.campaign-x-task > .campaign-post-target-list,
+.campaign-x-task > .campaign-add-post {
   grid-column: 1 / -1;
+}
+
+.campaign-post-target-list {
+  display: grid;
+  gap: 9px;
+}
+
+.campaign-post-target {
+  border: 1px solid rgba(243, 255, 238, 0.11);
+  border-radius: 6px;
+  padding: 12px;
+  background: rgba(1, 5, 6, 0.48);
+}
+
+.campaign-post-target-head {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+
+.campaign-post-target-head > span {
+  color: rgba(243, 255, 238, 0.52);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.campaign-post-target-head button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(243, 255, 238, 0.12);
+  border-radius: 4px;
+  padding: 0;
+  color: rgba(243, 255, 238, 0.5);
+  background: transparent;
+  cursor: pointer;
+}
+
+.campaign-post-target-head button:hover:not(:disabled) {
+  border-color: rgba(255, 101, 101, 0.45);
+  color: #ff8c8c;
+  background: rgba(255, 101, 101, 0.06);
+}
+
+.campaign-post-target-head button:disabled {
+  visibility: hidden;
+}
+
+.campaign-post-target > label {
+  display: block;
+}
+
+.campaign-post-target .campaign-engagement-options {
+  margin-top: 10px;
+}
+
+.campaign-add-post {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  border: 1px dashed rgba(55, 255, 181, 0.27);
+  border-radius: 5px;
+  padding: 0 12px;
+  color: var(--mint);
+  background: rgba(55, 255, 181, 0.025);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 760;
+}
+
+.campaign-add-post b {
+  margin-left: auto;
+  color: rgba(243, 255, 238, 0.38);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+}
+
+.campaign-add-post:hover:not(:disabled) {
+  border-style: solid;
+  background: rgba(55, 255, 181, 0.055);
+}
+
+.campaign-add-post:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .campaign-account-chips {
